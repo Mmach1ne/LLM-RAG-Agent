@@ -284,77 +284,9 @@ print("\nSpecialist team created:")
 for role, agent in team.items():
     print(f"  - {role}: {agent.name}")
 
-## 9. Best Practices and Tips
-
-print("\n--- Best Practices ---")
-
-best_practices = """
-1. **Regular State Saves**: Save agent state periodically to preserve learning
-2. **Memory Management**: Periodically clean old/irrelevant memories
-3. **Skill Organization**: Group related skills into modules
-4. **Error Handling**: Always wrap API calls in try-except blocks
-5. **Performance**: Use async operations for time-consuming tasks
-6. **Privacy**: Be careful with sensitive data in memory storage
-7. **Testing**: Test new skills thoroughly before deployment
-8. **Monitoring**: Log agent actions for debugging and improvement
-"""
-
-print(best_practices)
-
-## 10. Integration Examples
-
-print("\n--- Integration Ideas ---")
-
-integration_examples = """
-# OpenAI Integration Example (pseudo-code)
-def integrate_openai(agent):
-    import openai
-    
-    def gpt_skill(text):
-        try:
-            response = openai.Completion.create(
-                engine="gpt-3.5-turbo",
-                prompt=text,
-                max_tokens=150
-            )
-            return response.choices[0].text
-        except Exception as e:
-            return f"Error: {e}"
-    
-    agent.skill_registry.register("gpt", gpt_skill)
-
-# Database Integration Example
-def integrate_database(agent):
-    import sqlite3
-    
-    def db_query_skill(text):
-        # Parse query from text
-        # Execute safe database queries
-        # Return formatted results
-        pass
-    
-    agent.skill_registry.register("database", db_query_skill)
-
-# Web Scraping Integration
-def integrate_web_scraping(agent):
-    import requests
-    from bs4 import BeautifulSoup
-    
-    def web_search_skill(text):
-        # Extract search query
-        # Perform web search
-        # Parse and return results
-        pass
-    
-    agent.skill_registry.register("web_search", web_search_skill)
-"""
-
-print(integration_examples)
-
 # Final status check
 print("\n--- Final Agent Status ---")
 final_status = agent.get_status()
 print(json.dumps(final_status, indent=2))
 
-print("\n✅ Guide complete! You now know how to use the AI Agent framework.")
-print("Start with the basic examples and gradually add more complex features as needed.")
+print("\n Demo complete! You now know how to use the AI Agent framework.")

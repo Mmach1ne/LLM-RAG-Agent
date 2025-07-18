@@ -116,15 +116,10 @@ See the "Integration Ideas" section in `implementation.py` for code templates.
 
 ---
 
-## License
-
-MIT License (add your own license if needed)
-
----
 
 ## Author
 
-Your Name Here
+Ray Xue
 
 ---
 
