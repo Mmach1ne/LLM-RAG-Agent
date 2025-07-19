@@ -8,6 +8,9 @@ import re
 import random
 from collections import defaultdict
 import uuid
+import time
+import math
+import difflib
 
 # Agent States
 class AgentState(Enum):
@@ -76,71 +79,95 @@ class AIAgent:
         self.skill_registry.register("extract_entities", self._extract_entities)
         self.skill_registry.register("generate_response", self._generate_response)
         self.skill_registry.register("learn_pattern", self._learn_pattern)
-        
-    def process_input(self, user_input: str) -> str:
-        """Process user input and generate appropriate response"""
+        self.skill_registry.register("do_math", self._do_math)
+        self.skill_registry.register("generate_code", self._generate_code)
+        self.skill_registry.register("recall_fact", self._recall_fact)
+        self.skill_registry.register("weather", self._weather_widget)
+
+    def process_input(self, user_input: str) -> Any:
         self.state = AgentState.PROCESSING
-        
-        # Store conversation
-        self.conversation_history.append({
-            "timestamp": datetime.datetime.now(),
-            "user": user_input,
-            "agent": None
-        })
-        
-        # Analyze intent
+        task = self.task_manager.create_task(f"Process: {user_input}", Priority.MEDIUM)
+        time.sleep(1)  # Simulate processing
+        self.state = AgentState.EXECUTING
+        time.sleep(1)  # Simulate execution
         intent = self._analyze_intent(user_input)
-        
-        # Create task based on intent
-        task = self.task_manager.create_task(
-            description=f"Process: {intent['action']}",
-            priority=Priority.MEDIUM
-        )
-        
-        # Execute appropriate skill
         response = self._execute_skill(intent, user_input)
-        
-        # Update conversation history
-        self.conversation_history[-1]["agent"] = response
-        
-        # Learn from interaction
-        self._learn_from_interaction(user_input, response, intent)
-        
-        # Complete task
         self.task_manager.complete_task(task.id, response)
-        
         self.state = AgentState.IDLE
         return response
     
     def _analyze_intent(self, text: str) -> Dict[str, Any]:
-        """Analyze user intent from input text"""
-        # Simple pattern matching for demonstration
+        # Weather detection
+        weather_keywords = ["weather", "temperature", "forecast", "rain", "sunny", "cloudy", "windy", "snow", "humidity"]
+        if any(word in text.lower() for word in weather_keywords):
+            return {
+                "type": "weather",
+                "action": "weather",
+                "confidence": 0.98
+            }
+        # 1) Code detection …
+        code_keywords = [
+            "write a function", "python code", "show me code", "implement", "define a function", "create a function", "how do i code", "generate python", "function for", "code for", "print", "output", "count to", "count from"
+        ]
+        if any(word in text.lower() for word in code_keywords):
+            return {
+                "type": "code",
+                "action": "generate_code",
+                "confidence": 0.95
+            }
+        # 2) Recall detection …
+        recall_patterns = [
+            r'where do i (study|live|work)',
+            r'what is my (name|school|university|job|major|hobby|favorite|favourite)',
+            r'what did i tell you',
+            r'do you remember (.+)',
+            r'who am i',
+        ]
+        for pat in recall_patterns:
+            if re.search(pat, text.lower()):
+                return {
+                    "type": "recall",
+                    "action": "recall_fact",
+                    "confidence": 0.95
+                }
+        # 3) Learning trigger: look for “remember that …” or “remember my …”
+        lower = text.lower().strip()
+        if lower.startswith("remember ") or lower.startswith("remember that ") or lower.startswith("remember my "):
+            return {
+                "type": "learning",
+                "action": "learn_pattern",
+                "confidence": 0.95
+            }
+        # 4) Math detection …
+        math_keywords = ["add", "subtract", "multiply", "divide", "plus", "minus", "times", "over", "math", "calculate", "solve", "what is", "^", "sqrt", "log", "sin", "cos", "tan", "exp", "power", "root"]
+        if any(word in text.lower() for word in math_keywords) or re.search(r"\d+\s*([+\-*/^])\s*\d+", text):
+            return {
+                "type": "math",
+                "action": "do_math",
+                "confidence": 0.95
+            }
         patterns = {
             "question": r"\?$|^(what|who|where|when|why|how)",
             "command": r"^(do|make|create|build|analyze|summarize)",
             "statement": r"^(i|the|it|this|that)",
         }
-        
         intent_type = "unknown"
         for intent, pattern in patterns.items():
             if re.search(pattern, text.lower()):
                 intent_type = intent
                 break
-        
-        # Determine action based on intent
         action_map = {
             "question": "generate_response",
             "command": "analyze_text",
             "statement": "learn_pattern"
         }
-        
         return {
             "type": intent_type,
             "action": action_map.get(intent_type, "generate_response"),
             "confidence": 0.8
         }
     
-    def _execute_skill(self, intent: Dict[str, Any], input_text: str) -> str:
+    def _execute_skill(self, intent: Dict[str, Any], input_text: str) -> Any:
         """Execute skill based on intent"""
         skill_name = intent["action"]
         skill = self.skill_registry.get_skill(skill_name)
@@ -148,142 +175,108 @@ class AIAgent:
         if skill:
             return skill(input_text)
         else:
-            return "I'm not sure how to handle that request yet."
+            return {"response": "I'm not sure how to handle that request yet, but I'm always learning! If you want to analyze, summarize, or extract info, just let me know."}
     
     def _analyze_text(self, text: str) -> str:
-        """Analyze text and provide insights"""
         word_count = len(text.split())
         sentences = text.split('.')
         sentence_count = len([s for s in sentences if s.strip()])
-        
-        # Simple sentiment analysis
         positive_words = ['good', 'great', 'excellent', 'wonderful', 'amazing']
         negative_words = ['bad', 'terrible', 'awful', 'horrible', 'poor']
-        
         text_lower = text.lower()
         positive_score = sum(1 for word in positive_words if word in text_lower)
         negative_score = sum(1 for word in negative_words if word in text_lower)
-        
         sentiment = "neutral"
         if positive_score > negative_score:
             sentiment = "positive"
         elif negative_score > positive_score:
             sentiment = "negative"
-        
-        analysis = f"""Text Analysis:
-- Word count: {word_count}
-- Sentence count: {sentence_count}
-- Average words per sentence: {word_count / max(sentence_count, 1):.1f}
-- Sentiment: {sentiment}
-- Complexity: {'simple' if word_count < 50 else 'moderate' if word_count < 150 else 'complex'}"""
-        
-        return analysis
-    
+        return (
+            f"Here's what I found about your text!\n"
+            f"- Word count: {word_count}\n"
+            f"- Sentences: {sentence_count}\n"
+            f"- Sentiment: {sentiment}\n"
+            f"- Complexity: {'simple' if word_count < 50 else 'moderate' if word_count < 150 else 'complex'}\n"
+            f"If you'd like a summary or want me to extract details, just let me know!"
+        )
+
     def _summarize(self, text: str) -> str:
-        """Generate a summary of the text"""
         sentences = [s.strip() for s in text.split('.') if s.strip()]
-        
         if len(sentences) <= 2:
-            return text
-        
-        # Simple extractive summarization
-        # In practice, you'd use more sophisticated methods
-        key_sentences = sentences[:2]  # Take first two sentences
-        
-        return "Summary: " + '. '.join(key_sentences) + "."
-    
+            summary = text
+        else:
+            key_sentences = sentences[:2]
+            summary = '. '.join(key_sentences) + "."
+        return f"Here's a quick summary for you: {summary} If you want more details, just ask!"
+
     def _extract_entities(self, text: str) -> str:
-        """Extract named entities from text"""
-        # Simple pattern-based extraction
-        # In practice, you'd use NLP libraries like spaCy
-        
-        # Look for capitalized words (potential proper nouns)
         words = text.split()
         entities = [word for word in words if word[0].isupper() and len(word) > 1]
-        
-        # Look for numbers
         numbers = re.findall(r'\b\d+\b', text)
-        
-        # Look for dates (simple pattern)
         dates = re.findall(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b', text)
-        
-        result = "Extracted Entities:\n"
+        if not any([entities, numbers, dates]):
+            return "I couldn't find any specific names, numbers, or dates in your message. If you want me to look for something else, just let me know!"
+        result = "Here's what I found in your message:\n"
         if entities:
             result += f"- Names/Places: {', '.join(set(entities))}\n"
         if numbers:
             result += f"- Numbers: {', '.join(numbers)}\n"
         if dates:
             result += f"- Dates: {', '.join(dates)}\n"
-        
-        return result if any([entities, numbers, dates]) else "No specific entities found."
-    
+        result += "Let me know if you want more details about any of these!"
+        return result
+
     def _generate_response(self, text: str) -> str:
-        """Generate contextual response"""
-        # Check memory for relevant information
-        relevant_memories = self.memory_bank.search(text, limit=3)
-        
-        # Build context from memories
-        context = ""
-        if relevant_memories:
-            context = "Based on my memory: " + "; ".join([m.content.get("info", "") for m in relevant_memories])
-        
-        # Generate response based on personality and context
-        responses = {
-            "helpful": [
-                "I'd be happy to help with that.",
-                "Let me assist you with this.",
-                "Here's what I can tell you:"
-            ],
-            "analytical": [
-                "Let me analyze this for you.",
-                "Based on my analysis:",
-                "Here's my assessment:"
-            ],
-            "adaptive": [
-                "I'm learning from our interaction.",
-                "I'll remember this for next time.",
-                "I'm adapting to better serve you."
-            ]
-        }
-        
-        # Select response based on primary trait
-        primary_trait = self.personality["traits"][0]
-        response_prefix = random.choice(responses.get(primary_trait, ["I understand."]))
-        
-        # Simple response generation
-        if "?" in text:
-            response = f"{response_prefix} That's an interesting question. {context}"
-        else:
-            response = f"{response_prefix} I've noted your input. {context}"
-        
-        return response
+        # Friendly small talk and fallback
+        text_lower = text.lower()
+        greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]
+        if any(greet in text_lower for greet in greetings):
+            return "Hello! 😊 How can I help you today?"
+        if "how are you" in text_lower:
+            return "I'm just a bunch of code, but I'm always happy to chat and help you!"
+        if "thank" in text_lower:
+            return "You're very welcome! If you have more questions, just ask."
+        if "who are you" in text_lower or "what are you" in text_lower:
+            return "I'm Atlas, your friendly AI assistant! I'm here to help with anything you need."
+        if "help" in text_lower:
+            return "Of course! You can ask me to analyze text, summarize, extract information, or just chat. What would you like to do?"
+        # Fallback for general chat
+        return f"I'm not sure how to help with that yet, but I'm always learning! If you want to analyze, summarize, or extract info, just let me know."
     
     def _learn_pattern(self, text: str) -> str:
-        """Learn from patterns in text"""
         self.state = AgentState.LEARNING
-        
-        # Extract patterns (simplified)
         words = text.lower().split()
-        
-        # Store in memory
+        import re
+        lower_text = text.lower().strip()
+        is_fact = False
+        # Remove "remember", "remember that", or "remember my" from the start
+        cleaned_text = re.sub(r'^(remember( that| my)?\s*)', '', text, flags=re.IGNORECASE).strip()
+        if 'remember' in lower_text and (re.search(r'\bi\b', lower_text) or re.search(r'\bmy\b', lower_text)):
+            is_fact = True
+        else:
+            fact_patterns = [
+                r'^i am ', r'^i study ', r'^i work ', r'^i live ', r'^my name is ', r'^my school is ', r'^my university is ', r'^my job is ', r'^my major is ', r'^my hobby is ', r'^my favorite', r'^my favourite',
+                r'^remember that i ', r'^remember i ', r'^remember my ', r'^remember that my '
+            ]
+            is_fact = any(re.search(pat, lower_text) for pat in fact_patterns)
         memory_entry = {
-            "text": text,
-            "words": words,
-            "length": len(words),
-            "info": f"Learned pattern with {len(words)} words"
+            "text": cleaned_text,
+            "words": cleaned_text.lower().split(),
+            "length": len(cleaned_text.split()),
+            "info": f"Learned pattern with {len(cleaned_text.split())} words"
         }
-        
+        category = "user_fact" if is_fact else "pattern"
         self.memory_bank.store(
             content=memory_entry,
-            category="pattern"
+            category=category
         )
-        
-        # Increase experience
         self.experience_points += 10
         self.skill_levels["pattern_recognition"] += 1
-        
         self.state = AgentState.IDLE
-        return f"I've learned from this pattern. My pattern recognition skill is now level {self.skill_levels['pattern_recognition']}."
+        if is_fact:
+            return f"Thanks for sharing! I'll remember that: '{cleaned_text}' as a fact about you."
+        else:
+            return f"Thanks for sharing! I'll remember that: '{cleaned_text}'"
     
     def _learn_from_interaction(self, user_input: str, response: str, intent: Dict[str, Any]):
         """Learn from the interaction"""
@@ -325,11 +318,224 @@ class AIAgent:
             "personality": self.personality
         }
 
+    def _correct_typos(self, text: str) -> str:
+        # Common math keywords/functions and their correct forms
+        math_terms = [
+            'square', 'cube', 'root', 'sqrt', 'log', 'ln', 'sin', 'cos', 'tan', 'exp', 'power', 'percent',
+            'plus', 'minus', 'times', 'over', 'divided', 'multiplied', 'calculate', 'solve', 'what', 'is',
+            'of', 'by', 'to', 'the', 'and', 'for', 'abs', 'round', 'pow', 'min', 'max', 'radians', 'degrees'
+        ]
+        # Common number words
+        number_words = {
+            'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 'for': '4', 'five': '5',
+            'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10', 'eleven': '11', 'twelve': '12',
+            'thirteen': '13', 'fourteen': '14', 'fifteen': '15', 'sixteen': '16', 'seventeen': '17',
+            'eighteen': '18', 'nineteen': '19', 'twenty': '20'
+        }
+        typo_dict = {
+            'sqaure': 'square', 'squre': 'square', 'squar': 'square', 'sqare': 'square',
+            'sqaured': 'squared', 'squred': 'squared', 'cubed': 'cubed', 'cubic': 'cube',
+            'rooot': 'root', 'squroot': 'square root', 'squareroot': 'square root',
+            'sqaure root': 'square root', 'squarer oot': 'square root',
+            'sine': 'sin', 'cosine': 'cos', 'tanget': 'tan', 'tangent': 'tan',
+            'loog': 'log', 'lgo': 'log', 'lnn': 'ln', 'expnential': 'exp',
+            'devide': 'divide', 'multipliedby': 'multiplied by', 'devided': 'divided',
+            'devide by': 'divided by', 'pluss': 'plus', 'minuss': 'minus', 'timess': 'times',
+            'precent': 'percent', 'precentage': 'percent', 'precent of': 'percent of',
+            'sqaure of': 'square of', 'cubed of': 'cube of',
+        }
+        # Replace typo_dict first
+        for typo, correct in typo_dict.items():
+            text = re.sub(r'\b' + re.escape(typo) + r'\b', correct, text)
+        # Fuzzy match for math terms
+        words = text.split()
+        for i, word in enumerate(words):
+            if word not in math_terms:
+                close = difflib.get_close_matches(word, math_terms, n=1, cutoff=0.85)
+                if close:
+                    words[i] = close[0]
+            # Fuzzy match for number words
+            if word not in number_words.values() and word in number_words:
+                words[i] = number_words[word]
+            elif word not in number_words.values():
+                close_num = difflib.get_close_matches(word, list(number_words.keys()), n=1, cutoff=0.85)
+                if close_num:
+                    words[i] = number_words[close_num[0]]
+        return ' '.join(words)
+
+    def _do_math(self, text: str) -> str:
+        """Attempt to solve math expressions, including advanced functions and natural language phrases, with typo correction."""
+        intro = [
+            "Let's crunch those numbers!",
+            "Here's the math result:",
+            "Math to the rescue!",
+            "Here's what I calculated:",
+            "Numbers are my friends!"
+        ]
+        # Correct typos first
+        text = self._correct_typos(text)
+        expr = text.lower().replace('what is', '').replace('calculate', '').replace('solve', '').replace('?', '').strip()
+        expr = expr.replace('^', '**')
+        expr = expr.replace('plus', '+').replace('minus', '-').replace('times', '*').replace('over', '/').replace('divided by', '/').replace('multiplied by', '*')
+        expr = re.sub(r'\b(the|of|by|a|an|and|to|for)\b', '', expr)
+
+        # Natural language math phrase replacements
+        expr = re.sub(r'square root\s*(?:of)?\s*(\d+(?:\.\d+)?)', r'sqrt(\1)', expr)
+        expr = re.sub(r'cube root\s*(?:of)?\s*(\d+(?:\.\d+)?)', r'pow(\1, 1/3)', expr)
+        expr = re.sub(r'log\s*base\s*(\d+(?:\.\d+)?)\s*(?:of)?\s*(\d+(?:\.\d+)?)', r'log(\2, \1)', expr)
+        expr = re.sub(r'(\d+(?:\.\d+)?)\s*to the power of\s*(\d+(?:\.\d+)?)', r'pow(\1, \2)', expr)
+        expr = re.sub(r'(\d+(?:\.\d+)?)\s*squared', r'pow(\1, 2)', expr)
+        expr = re.sub(r'(\d+(?:\.\d+)?)\s*cubed', r'pow(\1, 3)', expr)
+        expr = re.sub(r'sin\s*\(?\s*(\d+(?:\.\d+)?)\s*degrees?\)?', r'sin(radians(\1))', expr)
+        expr = re.sub(r'cos\s*\(?\s*(\d+(?:\.\d+)?)\s*degrees?\)?', r'cos(radians(\1))', expr)
+        expr = re.sub(r'tan\s*\(?\s*(\d+(?:\.\d+)?)\s*degrees?\)?', r'tan(radians(\1))', expr)
+        expr = re.sub(r'sin\s*\(?\s*(\d+(?:\.\d+)?)\s*\)?', r'sin(\1)', expr)
+        expr = re.sub(r'cos\s*\(?\s*(\d+(?:\.\d+)?)\s*\)?', r'cos(\1)', expr)
+        expr = re.sub(r'tan\s*\(?\s*(\d+(?:\.\d+)?)\s*\)?', r'tan(\1)', expr)
+        expr = re.sub(r'exp\s*(?:of)?\s*(\d+(?:\.\d+)?)', r'exp(\1)', expr)
+        expr = re.sub(r'ln\s*(?:of)?\s*(\d+(?:\.\d+)?)', r'log(\1)', expr)
+        expr = re.sub(r'log\s*(?:of)?\s*(\d+(?:\.\d+)?)', r'log10(\1)', expr)
+        expr = re.sub(r'(\d+(?:\.\d+)?)\s*percent\s*of\s*(\d+(?:\.\d+)?)', r'(\1/100)*\2', expr)
+        expr = re.sub(r'\s+', '', expr)
+
+        allowed_names = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
+        allowed_names.update({'abs': abs, 'round': round, 'pow': pow, 'min': min, 'max': max})
+        try:
+            result = eval(expr, {"__builtins__": {}}, allowed_names)
+            return f"{random.choice(intro)} {text.strip()} = {result}"
+        except Exception as e:
+            return f"Oops! I couldn't solve that. Please check your math expression. (Error: {e})"
+
+    def _generate_code(self, text: str) -> str:
+        """Generate basic Python function code from user request."""
+        intro = [
+            "Here's a Python function for you!",
+            "Let me show you how to do that in Python:",
+            "Here's some Python code that should help:",
+            "Check out this Python function:",
+            "Python to the rescue!"
+        ]
+        lower = text.lower()
+        # Add support for 'add N numbers' (N=3-10)
+        match = re.search(r'add (\d+) numbers', lower)
+        if match:
+            n = int(match.group(1))
+            if 3 <= n <= 10:
+                args = ', '.join([f'a{i+1}' for i in range(n)])
+                sum_expr = ' + '.join([f'a{i+1}' for i in range(n)])
+                code = f'def add_{n}_numbers({args}):\n    return {sum_expr}'
+                return f"{random.choice(intro)}\n```python\n{code}\n```"
+        # Add support for 'count to N' or 'print numbers from X to Y'
+        match = re.search(r'(count|print numbers) (to|from) (\d+)( to (\d+))?', lower)
+        if match:
+            start = 1
+            end = 10
+            if match.group(2) == 'from' and match.group(3):
+                start = int(match.group(3))
+                if match.group(5):
+                    end = int(match.group(5))
+                else:
+                    end = start + 9
+            elif match.group(2) == 'to' and match.group(3):
+                end = int(match.group(3))
+            code = f'for i in range({start}, {end+1}):\n    print(i)'
+            return f"{random.choice(intro)}\n```python\n{code}\n```"
+        # Simple patterns for common requests
+        code_snippets = [
+            (r'add two numbers',
+             'def add(a, b):\n    return a + b'),
+            (r'subtract two numbers',
+             'def subtract(a, b):\n    return a - b'),
+            (r'multiply two numbers',
+             'def multiply(a, b):\n    return a * b'),
+            (r'divide two numbers',
+             'def divide(a, b):\n    if b == 0:\n        return "Cannot divide by zero"\n    return a / b'),
+            (r'factorial',
+             'def factorial(n):\n    if n == 0:\n        return 1\n    else:\n        return n * factorial(n-1)'),
+            (r'reverse a string',
+             'def reverse_string(s):\n    return s[::-1]'),
+            (r'palindrome',
+             'def is_palindrome(s):\n    return s == s[::-1]'),
+            (r'fibonacci',
+             'def fibonacci(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a'),
+            (r'sum of a list',
+             'def sum_list(lst):\n    return sum(lst)'),
+            (r'maximum in a list',
+             'def max_in_list(lst):\n    return max(lst)'),
+            (r'sort a list',
+             'def sort_list(lst):\n    return sorted(lst)'),
+            (r'prime',
+             'def is_prime(n):\n    if n <= 1:\n        return False\n    for i in range(2, int(n ** 0.5) + 1):\n        if n % i == 0:\n            return False\n    return True'),
+        ]
+        for pattern, code in code_snippets:
+            if re.search(pattern, lower):
+                return f"{random.choice(intro)}\n```python\n{code}\n```"
+        # Fallback: generic function template
+        return (f"{random.choice(intro)}\nHere's a generic Python function template you can adapt:\n"
+                """```python
+def my_function(args):
+    # Your code here
+    pass
+```""")
+
+    def _recall_fact(self, text: str) -> str:
+        """Recall a fact about the user from memory."""
+        # Use keywords from the question to search memory
+        keywords = re.findall(r'(study|school|university|name|job|major|hobby|favorite|favourite|work|live)', text.lower())
+        if not keywords:
+            keywords = [w for w in text.lower().split() if len(w) > 2]
+        facts = self.memory_bank.search(keywords[0] if keywords else '', limit=5)
+        user_facts = [f for f in facts if hasattr(f, 'category') and f.category == 'user_fact']
+        if user_facts:
+            # Return the most recent fact
+            fact = user_facts[0].content.get('text', '')
+            return f"Here's what you told me before: {fact}"
+        else:
+            return "I don't recall you telling me that yet! If you'd like me to remember, just tell me again."
+
+    def _weather_widget(self, text: str) -> dict:
+        import re
+        import requests
+        WEATHERSTACK_API_KEY = "0bfd9b2ffc4866026f7381c4396ab17e"
+        match = re.search(r'in ([A-Za-z ]+)', text)
+        location = match.group(1).strip() if match else "New York"
+        try:
+            url = f"http://api.weatherstack.com/current?access_key={WEATHERSTACK_API_KEY}&query={location}"
+            resp = requests.get(url, timeout=6)
+            data = resp.json()
+            if "current" not in data:
+                return {"response": f"Sorry, I couldn't get weather data for '{location}'. (Error: {data.get('error', {}).get('info', 'Unknown error')})"}
+            temp = f"{data['current']['temperature']}°C"
+            condition = data['current']['weather_descriptions'][0]
+            icon_url = data['current']['weather_icons'][0] if data['current']['weather_icons'] else ""
+            city = data['location']['name']
+            return {
+                "response": f"Here's the weather for {city}:",
+                "widget": {
+                    "type": "weather",
+                    "location": city,
+                    "temperature": temp,
+                    "condition": condition,
+                    "icon": icon_url
+                }
+            }
+        except requests.Timeout:
+            print("Weatherstack API request timed out.")
+            return {
+                "response": f"Sorry, the weather service timed out. Please try again later.",
+            }
+        except Exception as e:
+            print(f"Weatherstack API exception: {e}")
+            return {
+                "response": f"Sorry, there was an error fetching the weather: {e}",
+            }
+
 class MemoryBank:
     """Manages agent's memory storage and retrieval"""
     
     def __init__(self, db_path: str = ":memory:"):
-        self.conn = sqlite3.connect(db_path)
+        # Use check_same_thread=False for FastAPI thread safety
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self._init_db()
     
     def _init_db(self):
@@ -491,6 +697,39 @@ if __name__ == "__main__":
     response4 = agent.process_input("Extract entities from: John Smith visited Paris on 12/25/2023 and spent $500")
     print(f"User: Extract entities from: John Smith visited Paris on 12/25/2023 and spent $500")
     print(f"Agent: {response4}\n")
+    
+    # Test 5: Math calculation
+    response5 = agent.process_input("What is 2 + 2?")
+    print(f"User: What is 2 + 2?")
+    print(f"Agent: {response5}\n")
+
+    response6 = agent.process_input("Calculate 5 * (3 + 2) - 10 / 2")
+    print(f"User: Calculate 5 * (3 + 2) - 10 / 2")
+    print(f"Agent: {response6}\n")
+
+    response7 = agent.process_input("What is the square root of 16?")
+    print(f"User: What is the square root of 16?")
+    print(f"Agent: {response7}\n")
+
+    response8 = agent.process_input("What is log base 10 of 100?")
+    print(f"User: What is log base 10 of 100?")
+    print(f"Agent: {response8}\n")
+
+    response9 = agent.process_input("What is sin(90 degrees)?")
+    print(f"User: What is sin(90 degrees)?")
+    print(f"Agent: {response9}\n")
+
+    response10 = agent.process_input("What is 2^3?")
+    print(f"User: What is 2^3?")
+    print(f"Agent: {response10}\n")
+
+    response11 = agent.process_input("What is 100 / 0?")
+    print(f"User: What is 100 / 0?")
+    print(f"Agent: {response11}\n")
+
+    response12 = agent.process_input("What is 100 / 0?")
+    print(f"User: What is 100 / 0?")
+    print(f"Agent: {response12}\n")
     
     # Show agent status
     print("\n=== Agent Status ===")

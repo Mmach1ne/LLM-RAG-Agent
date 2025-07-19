@@ -1,0 +1,198 @@
+/* index.css */
+
+/* 1) Reset, box‑sizing, and global defaults */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+  color: #ffffff;             /* default text color */
+  font-family: system-ui, sans-serif;
+}
+
+/* 2) App background/container */
+.app-bg {
+  background: inherit;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* 3) Chat container */
+.chat-container {
+  width: 100%;
+  max-width: 768px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e293b;
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  color: #ffffff;
+}
+
+/* 4) Header bar (bot name + status) */
+.chat-container > aside {
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.chat-container > aside h2 {
+  color: #fff;
+  font-size: 1.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.status-item {
+  display: inline-block;
+  margin: 0 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* 5) Messages pane */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.6) transparent;
+}
+
+.messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.6);
+  border-radius: 3px;
+}
+
+/* 6) Chat bubbles */
+.chat-bubble {
+  max-width: 80%;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 0.75rem;
+  line-height: 1.5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  color: #ffffff;
+}
+
+.user-bubble {
+  background: linear-gradient(135deg, #5030e5, #6b21a8);
+  margin-left: auto;
+  text-align: right;
+}
+
+.agent-bubble {
+  background: #2d3748;
+  margin-right: auto;
+  text-align: left;
+}
+
+/* 7) Typing indicator */
+.typing-indicator {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 1rem;
+}
+
+.typing-indicator span {
+  width: 8px;
+  height: 8px;
+  background: #6b21a8;
+  border-radius: 50%;
+  animation: bounce 0.8s infinite;
+}
+
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+/* 8) Input area */
+.input-area {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: #111827;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.input-area input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: #1f2937;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  color: #ffffff;
+  font-size: 1rem;
+}
+
+.input-area input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.input-area button {
+  padding: 0.75rem 1.25rem;
+  background: linear-gradient(135deg, #6366f1, #7c3aed);
+  border: none;
+  border-radius: 0.5rem;
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.input-area button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input-area button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5);
+}
+
+/* 9) Weather widget (if used) */
+
+/* 10) Responsive tweaks */
+@media (max-width: 640px) {
+  .chat-container {
+    max-width: 100%;
+    height: 100vh;
+    border-radius: 0;
+  }
+}
