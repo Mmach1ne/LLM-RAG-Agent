@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './index.css';            // your global styles
 
-const API_URL = 'https://llm-agent-zwhq.onrender.com';
+const API_URL = 'http://34.83.90.220:8000';  // Updated API URL
 
 // Message type for chat messages
 type Message = {
