@@ -66,14 +66,13 @@ function App() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/status`);
-        const status = await res.json();
-        // Update your status state here if needed
+        // Ping status endpoint (no data needed here)
+        await fetch(`${API_URL}/api/status`);
       } catch (error) {
         console.error('Error fetching status:', error);
       }
     };
-    
+
     fetchStatus();
   }, []);
 
