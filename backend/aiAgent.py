@@ -503,7 +503,7 @@ class AIAgent:
             (r'palindrome',
              'def is_palindrome(s):\n    return s == s[::-1]'),
             (r'fibonacci',
-             'def fibonacci(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a'),
+             'def fibonacci(n):\n    """Returns the nth Fibonacci number (0-indexed)\n    Fibonacci sequence: 0, 1, 1, 2, 3, 5, 8, 13, 21, ...\n    """\n    if n <= 0:\n        return 0\n    elif n == 1:\n        return 1\n    \n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n\n# Example usage:\n# print(fibonacci(0))  # 0\n# print(fibonacci(1))  # 1\n# print(fibonacci(2))  # 1\n# print(fibonacci(3))  # 2\n# print(fibonacci(4))  # 3\n# print(fibonacci(5))  # 5'),
             (r'fibonacci.*dynamic.*programming|dynamic.*programming.*fibonacci|optimized.*fibonacci',
              'def fibonacci_dp(n):\n    if n <= 1:\n        return n\n    \n    # Dynamic programming approach\n    dp = [0] * (n + 1)\n    dp[0], dp[1] = 0, 1\n    \n    for i in range(2, n + 1):\n        dp[i] = dp[i-1] + dp[i-2]\n    \n    return dp[n]\n\n# Time: O(n), Space: O(n)'),
             (r'longest.*common.*subsequence|lcs',
