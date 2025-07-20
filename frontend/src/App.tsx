@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './index.css';
 
-const API_URL = 'http://34.83.90.220';
+const API_URL = 'http://34.83.90.220:8000';
 
 // Message type for chat messages
 type Message = {
