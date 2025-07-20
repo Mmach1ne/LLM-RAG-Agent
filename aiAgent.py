@@ -28,7 +28,7 @@ class Priority(Enum):
 
 @dataclass
 class Task:
-    """Represents a task for the agent to execute"""
+    "Represents a task for the agent to execute"
     id: str
     description: str
     priority: Priority
@@ -39,7 +39,7 @@ class Task:
 
 @dataclass
 class Memory:
-    """Represents a memory entry"""
+    "Represents a memory entry"
     id: str
     content: Dict[str, Any]
     timestamp: datetime.datetime
@@ -47,7 +47,6 @@ class Memory:
     relevance_score: float = 1.0
 
 class AIAgent:
-    """Advanced AI Agent with multiple capabilities"""
     
     def __init__(self, name: str, personality: Dict[str, Any] = None):
         self.name = name
@@ -249,7 +248,6 @@ class AIAgent:
         import re
         lower_text = text.lower().strip()
         is_fact = False
-        # Remove "remember", "remember that", or "remember my" from the start
         cleaned_text = re.sub(r'^(remember( that| my)?\s*)', '', text, flags=re.IGNORECASE).strip()
         if 'remember' in lower_text and (re.search(r'\bi\b', lower_text) or re.search(r'\bmy\b', lower_text)):
             is_fact = True
@@ -416,6 +414,17 @@ class AIAgent:
             "Python to the rescue!"
         ]
         lower = text.lower()
+        
+        # Add support for 'add 2 numbers' or 'add two numbers'
+        if re.search(r'(?:write\s+a\s+function\s+that\s+)?adds?\s+(?:2|two)\s+numbers?', lower):
+            code = """def add_two_numbers(a, b):
+    return a + b
+
+# Example usage:
+# result = add_two_numbers(5, 3)
+# print(result)  # Output: 8"""
+            return f"{random.choice(intro)}\n```python\n{code}\n```"
+        
         # Add support for 'add N numbers' (N=3-10)
         match = re.search(r'add (\d+) numbers', lower)
         if match:
@@ -425,6 +434,7 @@ class AIAgent:
                 sum_expr = ' + '.join([f'a{i+1}' for i in range(n)])
                 code = f'def add_{n}_numbers({args}):\n    return {sum_expr}'
                 return f"{random.choice(intro)}\n```python\n{code}\n```"
+        
         # Add support for 'count to N' or 'print numbers from X to Y'
         match = re.search(r'(count|print numbers) (to|from) (\d+)( to (\d+))?', lower)
         if match:
@@ -440,16 +450,17 @@ class AIAgent:
                 end = int(match.group(3))
             code = f'for i in range({start}, {end+1}):\n    print(i)'
             return f"{random.choice(intro)}\n```python\n{code}\n```"
+        
         # Simple patterns for common requests
         code_snippets = [
             (r'add two numbers',
-             'def add(a, b):\n    return a + b'),
+             'def add_two_numbers(a, b):\n    return a + b'),
             (r'subtract two numbers',
-             'def subtract(a, b):\n    return a - b'),
+             'def subtract_two_numbers(a, b):\n    return a - b'),
             (r'multiply two numbers',
-             'def multiply(a, b):\n    return a * b'),
+             'def multiply_two_numbers(a, b):\n    return a * b'),
             (r'divide two numbers',
-             'def divide(a, b):\n    if b == 0:\n        return "Cannot divide by zero"\n    return a / b'),
+             'def divide_two_numbers(a, b):\n    if b == 0:\n        return "Cannot divide by zero"\n    return a / b'),
             (r'factorial',
              'def factorial(n):\n    if n == 0:\n        return 1\n    else:\n        return n * factorial(n-1)'),
             (r'reverse a string',
@@ -470,6 +481,7 @@ class AIAgent:
         for pattern, code in code_snippets:
             if re.search(pattern, lower):
                 return f"{random.choice(intro)}\n```python\n{code}\n```"
+        
         # Fallback: generic function template
         return (f"{random.choice(intro)}\nHere's a generic Python function template you can adapt:\n"
                 """```python
@@ -531,7 +543,7 @@ def my_function(args):
             }
 
 class MemoryBank:
-    """Manages agent's memory storage and retrieval"""
+    "Manages agent's memory storage and retrieval"
     
     def __init__(self, db_path: str = ":memory:"):
         # Use check_same_thread=False for FastAPI thread safety
@@ -539,7 +551,7 @@ class MemoryBank:
         self._init_db()
     
     def _init_db(self):
-        """Initialize memory database"""
+        "Initialize memory database"
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
@@ -552,7 +564,7 @@ class MemoryBank:
         self.conn.commit()
     
     def store(self, content: Dict[str, Any], category: str) -> Memory:
-        """Store a new memory"""
+        "Store a new memory"
         memory = Memory(
             id=f"mem_{uuid.uuid4()}",
             content=content,
@@ -570,7 +582,7 @@ class MemoryBank:
         return memory
     
     def search(self, query: str, limit: int = 5) -> List[Memory]:
-        """Search memories by relevance"""
+        "Search memories by relevance"
         # Simple search - in practice, use vector similarity
         cursor = self.conn.execute(
             "SELECT * FROM memories WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
@@ -590,12 +602,11 @@ class MemoryBank:
         return memories
     
     def count(self) -> int:
-        """Get total memory count"""
         cursor = self.conn.execute("SELECT COUNT(*) FROM memories")
         return cursor.fetchone()[0]
 
 class TaskManager:
-    """Manages agent tasks and execution"""
+    "Manages agent tasks and execution"
     
     def __init__(self):
         self.tasks: Dict[str, Task] = {}
@@ -603,7 +614,6 @@ class TaskManager:
     
     def create_task(self, description: str, priority: Priority = Priority.MEDIUM, 
                    dependencies: List[str] = None) -> Task:
-        """Create a new task"""
         task = Task(
             id=f"task_{datetime.datetime.now().timestamp()}",
             description=description,
@@ -618,45 +628,44 @@ class TaskManager:
         return task
     
     def complete_task(self, task_id: str, result: Any = None):
-        """Mark task as completed"""
         if task_id in self.tasks:
             self.tasks[task_id].completed = True
             self.tasks[task_id].result = result
             self._update_queue()
     
     def get_pending_tasks(self) -> List[Task]:
-        """Get all pending tasks sorted by priority"""
+        "Get all pending tasks sorted by priority"
         pending = [t for t in self.tasks.values() if not t.completed]
         return sorted(pending, key=lambda t: t.priority.value, reverse=True)
     
     def _update_queue(self):
-        """Update task execution queue"""
+        "Update task execution queue"
         pending = self.get_pending_tasks()
         self.task_queue = [t.id for t in pending if self._can_execute(t)]
     
     def _can_execute(self, task: Task) -> bool:
-        """Check if task dependencies are satisfied"""
+        "Check if task dependencies are satisfied"
         for dep_id in task.dependencies:
             if dep_id in self.tasks and not self.tasks[dep_id].completed:
                 return False
         return True
 
 class SkillRegistry:
-    """Registry for agent skills"""
+    "Registry for agent skills"
     
     def __init__(self):
         self.skills: Dict[str, Callable] = {}
     
     def register(self, name: str, skill_func: Callable):
-        """Register a new skill"""
+        "Register a new skill"
         self.skills[name] = skill_func
     
     def get_skill(self, name: str) -> Optional[Callable]:
-        """Get skill by name"""
+        "Get skill by name"
         return self.skills.get(name)
     
     def list_skills(self) -> List[str]:
-        """List all available skills"""
+        "List all available skills"
         return list(self.skills.keys())
 
 # Example usage and demonstration
