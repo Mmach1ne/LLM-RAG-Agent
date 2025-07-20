@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './index.css';
 
-const API_URL = 'http://34.83.90.220';
 
 // Message type for chat messages
 type Message = {
@@ -106,7 +105,7 @@ function App() {
     setBotState('processing');
 
     try {
-      const res = await fetch(`${API_URL}/api/process`, {
+      const res = await fetch(`/api/process`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -141,7 +140,7 @@ function App() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/status`);
+        const res = await fetch(`/api/status`);
         const data = await res.json();
         
         // Update memory system stats
