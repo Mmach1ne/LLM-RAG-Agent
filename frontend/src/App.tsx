@@ -1,7 +1,8 @@
-// App.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './index.css';            // your global styles
+
+const API_URL = 'https://llm-agent-zwhq.onrender.com';
 
 // Message type for chat messages
 type Message = {
@@ -42,16 +43,39 @@ function App() {
     setInput('');
     setIsTyping(true);
 
-    // call your API
-    const res = await fetch('/api/process', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: text }),
-    });
-    const { response: botText, widget } = await res.json();
-    setMessages(m => [...m, { from: 'agent', text: botText, widget }]);
-    setIsTyping(false);
+    try {
+      const res = await fetch(`${API_URL}/api/process`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({ input: text }),
+      });
+      const { response: botText, widget } = await res.json();
+      setMessages(m => [...m, { from: 'agent', text: botText, widget }]);
+    } catch (error) {
+      console.error('Error:', error);
+      setMessages(m => [...m, { from: 'agent', text: 'Sorry, I encountered an error.' }]);
+    } finally {
+      setIsTyping(false);
+    }
   };
+
+  // Add a useEffect to fetch initial status
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/status`);
+        const status = await res.json();
+        // Update your status state here if needed
+      } catch (error) {
+        console.error('Error fetching status:', error);
+      }
+    };
+    
+    fetchStatus();
+  }, []);
 
   return (
     <div className="app-bg">
