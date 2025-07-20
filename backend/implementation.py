@@ -1,4 +1,4 @@
-from aiAgent import AIAgent, Priority, TaskManager, SkillRegistry
+from backend.aiAgent import AIAgent, Priority, TaskManager, SkillRegistry
 import json
 
 # Create your first agent

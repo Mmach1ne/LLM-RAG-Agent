@@ -104,16 +104,51 @@ class AIAgent:
                 "action": "weather",
                 "confidence": 0.98
             }
-        # 1) Code detection …
+        # 1) Code detection - broad patterns for coding requests
         code_keywords = [
-            "write a function", "python code", "show me code", "implement", "define a function", "create a function", "how do i code", "generate python", "function for", "code for", "print", "output", "count to", "count from"
+            "write a function", "write me a function", "write function", "python code", "show me code", "show code", "implement", "define a function", "create a function", "how do i code", "generate python", "function for", "code for", "print", "output", "count to", "count from",
+            "write code", "create code", "generate code", "make a function", "make function", "build a function", "build function", "code example", "python example", "programming", "script", "algorithm", "function that", "class", "method", "loop", "if statement", "while loop", "for loop",
+            "sort", "filter", "map", "list comprehension", "dictionary", "tuple", "set", "file handling", "read file", "write file", "database", "api", "web scraping", "data processing", "machine learning", "data analysis", "visualization", "plot", "chart", "graph"
         ]
+        # Check for keyword matches
         if any(word in text.lower() for word in code_keywords):
             return {
                 "type": "code",
                 "action": "generate_code",
                 "confidence": 0.95
             }
+        
+        # Check for regex patterns for more complex coding requests
+        code_patterns = [
+            r'write\s+(?:me\s+)?(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'create\s+(?:me\s+)?(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'generate\s+(?:me\s+)?(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'build\s+(?:me\s+)?(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'make\s+(?:me\s+)?(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'how\s+(?:do\s+i\s+)?(?:write|create|generate|build|make)\s+(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'can\s+you\s+(?:write|create|generate|build|make)\s+(?:me\s+)?(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'i\s+need\s+(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'help\s+me\s+(?:write|create|generate|build|make)\s+(?:a\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'example\s+(?:of\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'sample\s+(?:of\s+)?(?:python\s+)?(?:function|code|script|program)',
+            r'python\s+(?:function|code|script|program)\s+(?:for|that|to)',
+            r'function\s+(?:that|to|for)\s+',
+            r'class\s+(?:that|to|for)\s+',
+            r'method\s+(?:that|to|for)\s+',
+            r'algorithm\s+(?:for|to|that)\s+',
+            r'loop\s+(?:that|to|for)\s+',
+            r'if\s+statement\s+(?:for|to|that)\s+',
+            r'while\s+loop\s+(?:for|to|that)\s+',
+            r'for\s+loop\s+(?:for|to|that)\s+'
+        ]
+        
+        for pattern in code_patterns:
+            if re.search(pattern, text.lower()):
+                return {
+                    "type": "code",
+                    "action": "generate_code",
+                    "confidence": 0.95
+                }
         # 2) Recall detection …
         recall_patterns = [
             r'where do i (study|live|work)',
@@ -469,6 +504,16 @@ class AIAgent:
              'def is_palindrome(s):\n    return s == s[::-1]'),
             (r'fibonacci',
              'def fibonacci(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a'),
+            (r'fibonacci.*dynamic.*programming|dynamic.*programming.*fibonacci|optimized.*fibonacci',
+             'def fibonacci_dp(n):\n    if n <= 1:\n        return n\n    \n    # Dynamic programming approach\n    dp = [0] * (n + 1)\n    dp[0], dp[1] = 0, 1\n    \n    for i in range(2, n + 1):\n        dp[i] = dp[i-1] + dp[i-2]\n    \n    return dp[n]\n\n# Time: O(n), Space: O(n)'),
+            (r'longest.*common.*subsequence|lcs',
+             'def longest_common_subsequence(text1, text2):\n    m, n = len(text1), len(text2)\n    dp = [[0] * (n + 1) for _ in range(m + 1)]\n    \n    for i in range(1, m + 1):\n        for j in range(1, n + 1):\n            if text1[i-1] == text2[j-1]:\n                dp[i][j] = dp[i-1][j-1] + 1\n            else:\n                dp[i][j] = max(dp[i-1][j], dp[i][j-1])\n    \n    return dp[m][n]\n\n# Time: O(m*n), Space: O(m*n)'),
+            (r'knapsack.*problem|knapsack',
+             'def knapsack(values, weights, capacity):\n    n = len(values)\n    dp = [[0] * (capacity + 1) for _ in range(n + 1)]\n    \n    for i in range(1, n + 1):\n        for w in range(capacity + 1):\n            if weights[i-1] <= w:\n                dp[i][w] = max(dp[i-1][w], dp[i-1][w - weights[i-1]] + values[i-1])\n            else:\n                dp[i][w] = dp[i-1][w]\n    \n    return dp[n][capacity]\n\n# Time: O(n*capacity), Space: O(n*capacity)'),
+            (r'edit.*distance|levenshtein',
+             'def edit_distance(word1, word2):\n    m, n = len(word1), len(word2)\n    dp = [[0] * (n + 1) for _ in range(m + 1)]\n    \n    for i in range(m + 1):\n        dp[i][0] = i\n    for j in range(n + 1):\n        dp[0][j] = j\n    \n    for i in range(1, m + 1):\n        for j in range(1, n + 1):\n            if word1[i-1] == word2[j-1]:\n                dp[i][j] = dp[i-1][j-1]\n            else:\n                dp[i][j] = 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])\n    \n    return dp[m][n]\n\n# Time: O(m*n), Space: O(m*n)'),
+            (r'coin.*change|minimum.*coins',
+             'def coin_change(coins, amount):\n    dp = [float(\'inf\')] * (amount + 1)\n    dp[0] = 0\n    \n    for coin in coins:\n        for i in range(coin, amount + 1):\n            dp[i] = min(dp[i], dp[i - coin] + 1)\n    \n    return dp[amount] if dp[amount] != float(\'inf\') else -1\n\n# Time: O(amount * len(coins)), Space: O(amount)'),
             (r'sum of a list',
              'def sum_list(lst):\n    return sum(lst)'),
             (r'maximum in a list',

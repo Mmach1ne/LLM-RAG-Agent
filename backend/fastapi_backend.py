@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 # Remove all inline agent, memory, task, and skill class definitions
 # Import the advanced agent and enums from aiAgent.py
-from aiAgent import AIAgent, AgentState, Priority
+from backend.aiAgent import AIAgent, AgentState, Priority
 
 # Initialize FastAPI app and agent singleton
 app = FastAPI()
