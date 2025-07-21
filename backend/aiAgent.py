@@ -616,7 +616,6 @@ class RAGAIAgent:
         
         return "I don't have any information about that in my knowledge base yet."
 
-# Keep original MemoryBank, TaskManager, and SkillRegistry classes
 class MemoryBank:
     def __init__(self, db_path: str = ":memory:"):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)

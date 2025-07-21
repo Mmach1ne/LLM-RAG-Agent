@@ -1,133 +1,140 @@
-# AI Agent Framework
+# RayBot: RAG‑Powered AI Agent
 
-A modular, extensible Python framework for building advanced AI agents with memory, skills, goals, and interactive capabilities.
-
----
-
-## Features
-
-- **Agent Personality:** Define traits, learning rate, and curiosity.
-- **Task Management:** Add, prioritize, and track goals and tasks.
-- **Memory System:** Store and recall interactions and learned patterns using SQLite.
-- **Skill Registry:** Register built-in and custom skills (e.g., text analysis, entity extraction, calculator, weather).
-- **Interactive Chat:** Command-line chat interface for live interaction.
-- **Extensible:** Easily add new skills, integrate APIs, or create specialized agent subclasses.
-- **Persistence:** Save and load agent state.
-- **Multi-Agent Collaboration:** Create teams of specialist agents.
+RayBot is a lightweight, modular Retrieval‑Augmented Generation (RAG) chatbot and document assistant designed to run on small VMs. It integrates Google Gemini for generative capabilities, ChromaDB for vector search, and FastAPI for a simple HTTP interface.
 
 ---
 
-## Getting Started
+## 🚀 Features
 
-### 1. Clone or Download
+* **Retrieval‑Augmented Generation**: Ingest PDFs, DOCXs, and plain text to create a custom knowledge base.
+* **Google Gemini Integration**: Zero‑shot and context‑aware prompting via `gemini-1.5-flash`.
+* **Vector Search**: Semantic search with `all-MiniLM-L6-v2` embeddings in ChromaDB.
+* **Modular Skill Registry**: Easily add new capabilities like summarization, code generation, math solving, entity extraction, and more.
+* **Memory Bank**: Persistent conversation memory with SQLite and FIFO eviction.
+* **Task Manager**: Tracks asynchronous tasks, dependencies, and priorities.
+* **RESTful API**: Exposed via FastAPI with endpoints for chat, document upload, status, and health checks.
+* **Caching (Optional)**: Redis support for response caching.
 
-Place `aiAgent.py` and `implementation.py` in the same directory.
+---
 
-### 2. Install Requirements
+## 📦 Installation
 
-No external dependencies are required for the core framework.  
-For advanced integrations (OpenAI, web scraping), install:
-```bash
-pip install openai requests beautifulsoup4
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/your-org/raybot.git
+   cd raybot
+   ```
+
+2. **Create a virtual environment**
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate  # on Windows: .\.venv\Scripts\activate
+   ```
+
+3. **Install dependencies**
+
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+4. **Configure environment variables** (see below)
+
+5. **Run the server**
+
+   ```bash
+   uvicorn backend.fastapi_backend:app --host 0.0.0.0 --port 8000 --reload
+   ```
+
+---
+
+## ⚙️ Configuration
+
+Place configuration values in environment variables or a `.env` file:
+
+| Variable          | Default                  | Description                           |
+| ----------------- | ------------------------ | ------------------------------------- |
+| `GEMINI_API_KEY`  | `LOL`                    | Your Google Gemini API key            |
+| `GEMINI_MODEL`    | `gemini-1.5-flash`       | Gemini model name                     |
+| `REDIS_URL`       | `redis://localhost:6379` | Redis connection URL for caching      |
+| `USE_REDIS`       | `false`                  | Enable Redis caching (`true`/`false`) |
+| `MAX_UPLOAD_SIZE` | `10485760` (10 MB)       | Maximum upload size for documents     |
+
+---
+
+## 🗂️ Directory Structure
+
+```
+raybot/
+├─ backend/
+│  ├─ aiAgent.py          # Core RAG agent implementation
+│  ├─ fastapi_backend.py  # FastAPI app exposing endpoints
+│  └─ requirements.txt    # Python dependencies
+├─ chroma_db/            # ChromaDB persistence directory
+├─ .env                  # Environment variables (optional)
+└─ README.md             # This documentation
 ```
 
-### 3. Run the Demo
+---
 
-```bash
-python implementation.py
-```
+## 🚧 Usage
+
+### 1. Chat Endpoint
+
+**POST** `/api/process`
+
+* **Request**
+
+  ```json
+  { "input": "Hello, RayBot!" }
+  ```
+* **Response**
+
+  ```json
+  {
+    "response": "Hi there! How can I help?",
+    "type": "general"
+  }
+  ```
+
+### 2. Upload Document
+
+**POST** `/api/upload` (multipart/form-data)
+
+* **Form Field**: `file` – PDF, DOCX, TXT up to 10 MB
+* **Response**
+
+  ```json
+  {
+    "success": true,
+    "message": "Successfully ingested 12 chunks from example.pdf",
+    "chunks": 12
+  }
+  ```
+
+### 3. Status & Health
+
+* **GET** `/api/status` – Returns agent state, active tasks, memory count, etc.
+* **GET** `/health` – Returns `{ "status": "healthy", "agent": "Raybot" }`
 
 ---
 
-## Usage
+## 🔧 Extending RayBot
 
-### Create an Agent
+1. **Add a new skill** in `aiAgent.py`:
 
-```python
-from aiAgent import AIAgent, Priority
+   ```python
+   def translate(self, text: str) -> str:
+       prompt = f"Translate to French:\n{text}"
+       return self.gemini.generate_response(prompt)
+   ```
+2. **Register the skill**:
 
-agent = AIAgent(
-    name="Assistant",
-    personality={
-        "traits": ["helpful", "analytical"],
-        "learning_rate": 0.2,
-        "curiosity": 0.8
-    }
-)
-```
-
-### Interact with the Agent
-
-```python
-response = agent.process_input("Hello! How are you today?")
-print(response)
-```
-
-### Add Goals and Tasks
-
-```python
-agent.add_goal("Help user with daily tasks", Priority.HIGH)
-```
-
-### Register Custom Skills
-
-```python
-def weather_skill(text):
-    return "It's sunny!"
-
-agent.skill_registry.register("weather", weather_skill)
-```
-
-### Use the Chat Interface
-
-Uncomment the line in `implementation.py`:
-```python
-# chat_with_agent(agent)
-```
-Then run the script for an interactive session.
-
----
-
-## Advanced Examples
-
-- **Personal Assistant:** Extend `AIAgent` to create specialized assistants.
-- **Save/Load State:** Use provided functions to persist agent progress.
-- **Multi-Agent Teams:** Instantiate and coordinate multiple agents.
-
----
-
-## Best Practices
-
-- Save agent state regularly.
-- Clean up old memories as needed.
-- Group related skills into modules.
-- Handle errors gracefully.
-- Respect privacy and sensitive data.
-
----
-
-## Integration Ideas
-
-- **OpenAI GPT:** Add advanced language skills.
-- **Database Access:** Query and summarize data.
-- **Web Scraping:** Fetch and process online information.
-
-See the "Integration Ideas" section in `implementation.py` for code templates.
-
----
+   ```python
+   self.skill_registry.register("translate", self.translate)
+   ```
+3. **Update intent analysis** to return `action: "translate"` when appropriate.
 
 
-## Author
-
-Ray Xue
-
----
-
-## Acknowledgments
-
-- Inspired by modular AI agent architectures.
-- Uses Python standard library for maximum compatibility.
-
----
-
-Enjoy building with your AI Agent
