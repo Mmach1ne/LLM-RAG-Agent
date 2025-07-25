@@ -212,31 +212,96 @@ class DocumentProcessor:
         file_extension = Path(file_path).suffix.lower()
         
         try:
-            if file_extension == '.pdf':
-                loader = PyPDFLoader(file_path)
+            print(f"📄 Processing file: {file_path} (extension: {file_extension})")
+            
+            # Handle text files directly without LangChain loaders
+            if file_extension in ['.txt', '.md']:
+                try:
+                    # Read file directly
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        text = f.read()
+                    
+                    print(f"📖 Read {len(text)} characters from text file")
+                    
+                    # Split into chunks
+                    if len(text) > Config.MAX_CHUNK_SIZE:
+                        # Use text splitter for large files
+                        chunks = self.text_splitter.split_text(text)
+                        print(f"🔪 Split into {len(chunks)} chunks")
+                    else:
+                        # Small file, use as single chunk
+                        chunks = [text]
+                    
+                    # Create document chunks
+                    return [
+                        {
+                            "id": f"{Path(file_path).stem}_chunk_{i}",
+                            "content": chunk,
+                            "metadata": {
+                                "source": Path(file_path).name,
+                                "chunk_index": i,
+                                "total_chunks": len(chunks),
+                                "file_type": file_extension
+                            }
+                        }
+                        for i, chunk in enumerate(chunks)
+                    ]
+                except Exception as e:
+                    print(f"❌ Error reading text file: {e}")
+                    raise
+            
+            # Handle PDFs
+            elif file_extension == '.pdf':
+                try:
+                    loader = PyPDFLoader(file_path)
+                    documents = loader.load()
+                    chunks = self.text_splitter.split_documents(documents)
+                    
+                    return [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "content": chunk.page_content,
+                            "metadata": {
+                                "source": Path(file_path).name,
+                                "chunk_index": i,
+                                **chunk.metadata
+                            }
+                        }
+                        for i, chunk in enumerate(chunks)
+                    ]
+                except Exception as e:
+                    print(f"❌ Error processing PDF: {e}")
+                    raise
+            
+            # Handle DOCX
             elif file_extension in ['.docx', '.doc']:
-                loader = Docx2txtLoader(file_path)
-            elif file_extension in ['.txt', '.md']:
-                loader = TextLoader(file_path)
+                try:
+                    loader = Docx2txtLoader(file_path)
+                    documents = loader.load()
+                    chunks = self.text_splitter.split_documents(documents)
+                    
+                    return [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "content": chunk.page_content,
+                            "metadata": {
+                                "source": Path(file_path).name,
+                                "chunk_index": i,
+                                **chunk.metadata
+                            }
+                        }
+                        for i, chunk in enumerate(chunks)
+                    ]
+                except Exception as e:
+                    print(f"❌ Error processing DOCX: {e}")
+                    raise
+            
             else:
                 raise ValueError(f"Unsupported file type: {file_extension}")
-            
-            documents = loader.load()
-            chunks = self.text_splitter.split_documents(documents)
-            
-            return [
-                {
-                    "id": str(uuid.uuid4()),
-                    "content": chunk.page_content,
-                    "metadata": {
-                        "source": file_path,
-                        "chunk_index": i,
-                        **chunk.metadata
-                    }
-                }
-                for i, chunk in enumerate(chunks)
-            ]
+                
         except Exception as e:
+            print(f"❌ Error in process_file: {e}")
+            traceback.print_exc()
             raise Exception(f"Error processing file: {str(e)}")
 
 class MemoryBank:
@@ -670,37 +735,119 @@ class RAGAIAgent:
     
     def _needs_rag(self, text: str, intent: Dict[str, Any]) -> bool:
         """Determine if RAG is needed for the query"""
+        # Don't use RAG for personal queries
+        if "my" in text.lower() and any(word in text.lower() for word in ["name", "favorite", "like", "am"]):
+            return False
+            
         rag_indicators = [
             "document", "file", "knowledge", "information", "data",
             "what does the document say", "according to", "find in",
-            "search for", "look up"
+            "search for", "look up", "tell me about", "explain",
+            "what is", "how does", "why does", "when did"
         ]
-        return any(indicator in text.lower() for indicator in rag_indicators)
+        
+        # Check if any indicators are present
+        lower_text = text.lower()
+        for indicator in rag_indicators:
+            if indicator in lower_text:
+                # But exclude if it's about personal info or math
+                if not any(personal in lower_text for personal in ["my name", "my favorite", "calculate", "+", "-", "*", "/"]):
+                    return True
+        
+        return False
     
     async def _rag_query(self, query: str) -> Dict[str, str]:
-        """Perform RAG query"""
-        # Search vector store
-        relevant_docs = self.vector_store.search(query)
-        
-        if not relevant_docs:
-            # Fall back to Gemini without context
-            response = self.gemini.generate_response(query)
-        else:
-            # Extract content from results
-            context = [doc["content"] for doc in relevant_docs[:Config.MAX_CHUNKS_PER_QUERY]]
-            response = self.gemini.generate_response(query, context)
+        """Perform RAG query - FIXED VERSION"""
+        try:
+            print(f"🔍 RAG Query for: {query}")
             
-            # Store in memory for learning
-            self.memory_bank.store(
-                content={
-                    "query": query,
-                    "response": response,
-                    "sources": [doc["metadata"].get("source", "unknown") for doc in relevant_docs]
-                },
-                category="rag_interaction"
-            )
-        
-        return {"response": response, "type": "rag"}
+            # Check if vector store has any documents
+            collection_count = self.vector_store.collection.count()
+            print(f"📚 Vector store has {collection_count} documents")
+            
+            if collection_count == 0:
+                print("⚠️ No documents in vector store, using Gemini directly")
+                response = self.gemini.generate_response(query)
+                return {
+                    "response": f"{response}\n\n*Note: No documents have been uploaded to the knowledge base yet. Upload documents to enable document-based responses.*",
+                    "type": "rag"
+                }
+            
+            # Search vector store
+            relevant_docs = self.vector_store.search(query)
+            print(f"📄 Found {len(relevant_docs)} relevant documents")
+            
+            if not relevant_docs:
+                # No relevant docs found, but we have documents - try a broader search
+                print("🔄 No exact matches, trying broader search...")
+                
+                # Extract key terms for broader search
+                keywords = re.findall(r'\b\w{4,}\b', query.lower())
+                for keyword in keywords[:3]:
+                    relevant_docs = self.vector_store.search(keyword, k=3)
+                    if relevant_docs:
+                        print(f"✅ Found {len(relevant_docs)} documents with keyword: {keyword}")
+                        break
+            
+            if not relevant_docs:
+                # Still no docs, fall back to Gemini
+                response = self.gemini.generate_response(query)
+                return {
+                    "response": f"{response}\n\n*Note: Could not find relevant information in the uploaded documents.*",
+                    "type": "rag"
+                }
+            else:
+                # Extract content from results
+                context = []
+                sources = []
+                
+                for i, doc in enumerate(relevant_docs[:Config.MAX_CHUNKS_PER_QUERY]):
+                    context.append(f"[Document {i+1}]: {doc['content']}")
+                    source = doc.get("metadata", {}).get("source", "unknown")
+                    if source not in sources:
+                        sources.append(source)
+                
+                print(f"📑 Using {len(context)} document chunks as context")
+                print(f"📍 Sources: {sources}")
+                
+                # Generate response with context
+                response = self.gemini.generate_response(query, context)
+                
+                # Store in memory for learning
+                self.memory_bank.store(
+                    content={
+                        "query": query,
+                        "response": response,
+                        "sources": sources,
+                        "chunks_used": len(context)
+                    },
+                    category="rag_interaction"
+                )
+                
+                # Add source attribution
+                source_text = f"\n\n*Sources: {', '.join(sources)}*" if sources else ""
+                
+                return {
+                    "response": f"{response}{source_text}",
+                    "type": "rag"
+                }
+                
+        except Exception as e:
+            print(f"❌ Error in RAG query: {e}")
+            traceback.print_exc()
+            
+            # Fallback to Gemini
+            try:
+                response = self.gemini.generate_response(query)
+                return {
+                    "response": f"{response}\n\n*Note: RAG system encountered an error, using general knowledge.*",
+                    "type": "rag_error"
+                }
+            except Exception as gemini_error:
+                return {
+                    "response": f"I encountered an error processing your request: {str(e)}",
+                    "type": "error"
+                }
     
     def _summarize_with_gemini(self, text: str) -> str:
         """Use Gemini for summarization"""
@@ -714,38 +861,93 @@ class RAGAIAgent:
         return f"Here's the code:\n```python\n{response}\n```"
     
     async def ingest_document(self, file_path: str) -> Dict[str, Any]:
-        """Ingest a document into the knowledge base"""
+        """Ingest a document into the knowledge base - ENHANCED VERSION"""
         try:
+            print(f"📥 Ingesting document: {file_path}")
+            
+            # Check file exists
+            if not os.path.exists(file_path):
+                return {
+                    "success": False,
+                    "message": f"File not found: {file_path}"
+                }
+            
+            # Get file size
+            file_size = os.path.getsize(file_path)
+            print(f"📏 File size: {file_size} bytes")
+            
+            # Process the file
             chunks = await self.doc_processor.process_file(file_path)
+            print(f"📄 Processed into {len(chunks)} chunks")
+            
+            # Add to vector store
             self.vector_store.add_documents(chunks)
+            print(f"✅ Added {len(chunks)} chunks to vector store")
+            
+            # Verify addition
+            new_count = self.vector_store.collection.count()
+            print(f"📊 Vector store now has {new_count} total documents")
+            
+            # Store metadata in memory
+            self.memory_bank.store(
+                content={
+                    "action": "document_ingested",
+                    "filename": os.path.basename(file_path),
+                    "chunks": len(chunks),
+                    "timestamp": datetime.datetime.now().isoformat()
+                },
+                category="document_ingestion"
+            )
+            
             return {
                 "success": True,
-                "message": f"Successfully ingested {len(chunks)} chunks from {file_path}",
-                "chunks": len(chunks)
+                "message": f"Successfully ingested {len(chunks)} chunks from {os.path.basename(file_path)}",
+                "chunks": len(chunks),
+                "total_documents": new_count
             }
+            
         except Exception as e:
-            # Fallback for plain-text files if loader fails
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext == ".txt":
+            print(f"❌ Error ingesting document: {e}")
+            traceback.print_exc()
+            
+            # Try simpler ingestion for text files
+            if file_path.endswith('.txt'):
                 try:
-                    async with aiofiles.open(file_path, mode='r', encoding='utf-8') as f:
-                        text = await f.read()
-                    docs = [{
-                        "id": os.path.basename(file_path),
-                        "content": text,
-                        "metadata": {"source": os.path.basename(file_path)}
-                    }]
-                    self.vector_store.add_documents(docs)
+                    print("🔄 Attempting simple text ingestion...")
+                    
+                    # Read file directly
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    print(f"📖 Read {len(content)} characters")
+                    
+                    # Create simple chunks
+                    chunk_size = Config.MAX_CHUNK_SIZE
+                    chunks = []
+                    
+                    for i in range(0, len(content), chunk_size - 50):  # 50 char overlap
+                        chunk_text = content[i:i + chunk_size]
+                        chunks.append({
+                            "id": f"{os.path.basename(file_path)}_chunk_{i//chunk_size}",
+                            "content": chunk_text,
+                            "metadata": {
+                                "source": os.path.basename(file_path),
+                                "chunk_index": i // chunk_size
+                            }
+                        })
+                    
+                    # Add to vector store
+                    self.vector_store.add_documents(chunks)
+                    
                     return {
                         "success": True,
-                        "message": f"Ingested plain-text file {os.path.basename(file_path)}",
-                        "chunks": 1
+                        "message": f"Successfully ingested {len(chunks)} chunks from {os.path.basename(file_path)} (simple method)",
+                        "chunks": len(chunks)
                     }
-                except Exception as fallback_e:
-                    return {
-                        "success": False,
-                        "message": f"Error ingesting plain-text file: {str(fallback_e)}"
-                    }
+                    
+                except Exception as txt_error:
+                    print(f"❌ Simple text ingestion also failed: {txt_error}")
+                    
             return {
                 "success": False,
                 "message": f"Error ingesting document: {str(e)}"
@@ -1230,13 +1432,29 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "agent": agent.name}
 
-@app.get("/api/debug/memory")
-async def debug_memory():
-    """Debug memory contents"""
+@app.get("/api/rag/status")
+async def rag_status():
+    """Get RAG system status"""
     try:
-        return agent.debug_memory()
+        doc_count = agent.vector_store.collection.count()
+        memories = agent.memory_bank.get_by_category("rag_interaction", limit=5)
+        ingestions = agent.memory_bank.get_by_category("document_ingestion", limit=5)
+        
+        return {
+            "status": "active",
+            "documents_in_store": doc_count,
+            "recent_rag_queries": len(memories),
+            "recent_ingestions": [
+                {
+                    "filename": ing.content.get("filename"),
+                    "chunks": ing.content.get("chunks"),
+                    "timestamp": ing.content.get("timestamp")
+                }
+                for ing in ingestions
+            ]
+        }
     except Exception as e:
-        return {"error": str(e)}
+        return {"status": "error", "message": str(e)}
 
 # Deployment script for small VM
 if __name__ == "__main__":
