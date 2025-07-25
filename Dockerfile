@@ -17,5 +17,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ./backend .
 
-# Use Render's PORT environment variable
-CMD uvicorn backend.fastapi_backend:app --host 0.0.0.0 --port $PORT
+# Run as Python module
+CMD ["sh", "-c", "python -m uvicorn fastapi_backend:app --host 0.0.0.0 --port ${PORT:-8000}"]
