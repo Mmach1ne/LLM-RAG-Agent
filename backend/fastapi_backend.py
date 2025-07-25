@@ -10,7 +10,7 @@ import os
 import tempfile
 
 # Import the advanced agent and enums + Config from aiAgent.py
-from backend.aiAgent import RAGAIAgent as AIAgent, AgentState, Priority, Config
+from aiAgent import RAGAIAgent as AIAgent, AgentState, Priority, Config
 
 # Initialize FastAPI app
 app = FastAPI()
