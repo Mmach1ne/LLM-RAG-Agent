@@ -1,5 +1,5 @@
 [[redirects]]
   from    = "/api/*"
-  to      = "http://34.83.90.220/api/:splat"
+  to      = "https://llm-rag-agent.onrender.com/api/:splat"
   status  = 200
   force   = true
