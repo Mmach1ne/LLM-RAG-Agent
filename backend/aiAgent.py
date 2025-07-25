@@ -15,6 +15,7 @@ import difflib
 import asyncio
 from pathlib import Path
 import traceback
+import threading
 
 # Google Gemini
 import google.generativeai as genai
@@ -40,6 +41,9 @@ from functools import lru_cache
 
 # Async file handling
 import aiofiles
+from dotenv import load_dotenv
+dotenv_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path) 
 
 # Configuration for small VM deployment
 class Config:
@@ -95,7 +99,7 @@ class Memory:
     timestamp: datetime.datetime
     category: str
     relevance_score: float = 1.0
-    embedding: Optional[List[float]] = None
+    embedding: List[float] = None
 
 # Vector Database Manager
 class VectorStore:
@@ -235,6 +239,232 @@ class DocumentProcessor:
         except Exception as e:
             raise Exception(f"Error processing file: {str(e)}")
 
+class MemoryBank:
+    def __init__(self, db_path: str = "agent_memory.db"):
+        self.db_path = db_path
+        self.lock = threading.Lock()
+        print(f"Initializing MemoryBank with database: {self.db_path}")
+        try:
+            self._init_db()
+            print(f"MemoryBank initialized successfully. Current memory count: {self.count()}")
+        except Exception as e:
+            print(f"Error initializing MemoryBank: {e}")
+            raise
+    
+    def _get_connection(self):
+        """Get a new connection for each operation to avoid thread issues"""
+        try:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            return conn
+        except Exception as e:
+            print(f"Error creating database connection: {e}")
+            raise
+    
+    def _init_db(self):
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memories (
+                    id TEXT PRIMARY KEY,
+                    content TEXT,
+                    category TEXT,
+                    timestamp TEXT,
+                    relevance_score REAL
+                )
+            """)
+            conn.commit()
+            print("Database tables created/verified")
+    
+    def store(self, content: Dict[str, Any], category: str) -> Memory:
+        with self.lock:
+            try:
+                print(f"Attempting to store memory in category: {category}")
+                print(f"Content: {content}")
+                
+                conn = self._get_connection()
+                
+                # Check current count and implement FIFO if needed
+                cursor = conn.execute("SELECT COUNT(*) FROM memories")
+                current_count = cursor.fetchone()[0]
+                print(f"Current memory count: {current_count}")
+                
+                if current_count >= Config.MAX_MEMORY_ITEMS:
+                    print("Memory limit reached, cleaning up old entries...")
+                    conn.execute("""
+                        DELETE FROM memories 
+                        WHERE id IN (
+                            SELECT id FROM memories 
+                            ORDER BY timestamp ASC 
+                            LIMIT 100
+                        )
+                    """)
+                    conn.commit()
+                    print("Old memories cleaned up")
+                
+                # Create new memory
+                memory = Memory(
+                    id=f"mem_{uuid.uuid4()}",
+                    content=content,
+                    timestamp=datetime.datetime.now(),
+                    category=category
+                )
+                
+                # Insert new memory
+                conn.execute(
+                    "INSERT INTO memories VALUES (?, ?, ?, ?, ?)",
+                    (memory.id, json.dumps(content), category, 
+                     memory.timestamp.isoformat(), memory.relevance_score)
+                )
+                conn.commit()
+                conn.close()
+                
+                print(f"✓ Successfully stored memory: {memory.id}")
+                return memory
+                
+            except Exception as e:
+                print(f"✗ Error storing memory: {e}")
+                print(f"Content that failed: {content}")
+                if 'conn' in locals():
+                    conn.close()
+                raise
+    
+    def search(self, query: str, limit: int = 5) -> List[Memory]:
+        with self.lock:
+            try:
+                print(f"Searching memories for: '{query}'")
+                conn = self._get_connection()
+                
+                # Search in both content and category
+                cursor = conn.execute(
+                    """SELECT * FROM memories 
+                    WHERE content LIKE ? OR category LIKE ?
+                    ORDER BY timestamp DESC LIMIT ?""",
+                    (f"%{query}%", f"%{query}%", limit)
+                )
+                
+                memories = []
+                for row in cursor:
+                    try:
+                        memory = Memory(
+                            id=row[0],
+                            content=json.loads(row[1]),
+                            timestamp=datetime.datetime.fromisoformat(row[3]),
+                            category=row[2],
+                            relevance_score=row[4]
+                        )
+                        memories.append(memory)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        print(f"Error parsing memory {row[0]}: {e}")
+                        continue
+                
+                conn.close()
+                print(f"✓ Found {len(memories)} memories for query: '{query}'")
+                for mem in memories:
+                    print(f"  - {mem.category}: {mem.content}")
+                return memories
+                
+            except Exception as e:
+                print(f"✗ Error searching memories: {e}")
+                if 'conn' in locals():
+                    conn.close()
+                return []
+    
+    def get_by_category(self, category: str, limit: int = 10) -> List[Memory]:
+        """Get memories by category"""
+        with self.lock:
+            try:
+                conn = self._get_connection()
+                cursor = conn.execute(
+                    "SELECT * FROM memories WHERE category = ? ORDER BY timestamp DESC LIMIT ?",
+                    (category, limit)
+                )
+                
+                memories = []
+                for row in cursor:
+                    try:
+                        memory = Memory(
+                            id=row[0],
+                            content=json.loads(row[1]),
+                            timestamp=datetime.datetime.fromisoformat(row[3]),
+                            category=row[2],
+                            relevance_score=row[4]
+                        )
+                        memories.append(memory)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        print(f"Error parsing memory {row[0]}: {e}")
+                        continue
+                
+                conn.close()
+                return memories
+                
+            except Exception as e:
+                print(f"Error getting memories by category: {e}")
+                return []
+    
+    def count(self) -> int:
+        with self.lock:
+            try:
+                conn = self._get_connection()
+                cursor = conn.execute("SELECT COUNT(*) FROM memories")
+                count = cursor.fetchone()[0]
+                conn.close()
+                return count
+            except Exception as e:
+                print(f"Error counting memories: {e}")
+                return 0
+
+class TaskManager:
+    def __init__(self):
+        self.tasks: Dict[str, Task] = {}
+        self.task_queue: List[str] = []
+    
+    def create_task(self, description: str, priority: Priority = Priority.MEDIUM, 
+                   dependencies: List[str] = None) -> Task:
+        task = Task(
+            id=f"task_{datetime.datetime.now().timestamp()}",
+            description=description,
+            priority=priority,
+            created_at=datetime.datetime.now(),
+            dependencies=dependencies or []
+        )
+        
+        self.tasks[task.id] = task
+        self._update_queue()
+        
+        return task
+    
+    def complete_task(self, task_id: str, result: Any = None):
+        if task_id in self.tasks:
+            self.tasks[task_id].completed = True
+            self.tasks[task_id].result = result
+            self._update_queue()
+    
+    def get_pending_tasks(self) -> List[Task]:
+        pending = [t for t in self.tasks.values() if not t.completed]
+        return sorted(pending, key=lambda t: t.priority.value, reverse=True)
+    
+    def _update_queue(self):
+        pending = self.get_pending_tasks()
+        self.task_queue = [t.id for t in pending if self._can_execute(t)]
+    
+    def _can_execute(self, task: Task) -> bool:
+        for dep_id in task.dependencies:
+            if dep_id in self.tasks and not self.tasks[dep_id].completed:
+                return False
+        return True
+
+class SkillRegistry:
+    def __init__(self):
+        self.skills: Dict[str, Callable] = {}
+    
+    def register(self, name: str, skill_func: Callable):
+        self.skills[name] = skill_func
+    
+    def get_skill(self, name: str) -> Optional[Callable]:
+        return self.skills.get(name)
+    
+    def list_skills(self) -> List[str]:
+        return list(self.skills.keys())
+
 # Enhanced AI Agent with RAG
 class RAGAIAgent:
     def __init__(self, name: str, personality: Dict[str, Any] = None):
@@ -247,7 +477,7 @@ class RAGAIAgent:
         }
         
         # Core components
-        self.memory_bank = MemoryBank()
+        self.memory_bank = MemoryBank("agent_memory.db")
         self.task_manager = TaskManager()
         self.skill_registry = SkillRegistry()
         self.conversation_history = []
@@ -277,7 +507,7 @@ class RAGAIAgent:
     def get_status(self) -> Dict[str, Any]:
         if self._response_times:
             avg_rt = sum(self._response_times) / len(self._response_times)
-            avg_rt_str = f"{avg_rt:.1f} ms"
+            avg_rt_str = f"{avg_rt:.1f} ms"
         else:
             avg_rt_str = "N/A"
         return {
@@ -317,13 +547,14 @@ class RAGAIAgent:
                 "avgResponseTime": avg_rt_str
             }
         }
+    
     def record_response_time(self, start: float, end: float):
         """Call this at the end of each request/response cycle."""
         elapsed_ms = (end - start) * 1000
         self._response_times.append(elapsed_ms)
     
     def _register_default_skills(self):
-        """Register built-in skills including RAG"""
+        """Register built-in skills including fixed memory skills"""
         self.skill_registry.register("rag_query", self._rag_query)
         self.skill_registry.register("analyze_text", self._analyze_text)
         self.skill_registry.register("summarize", self._summarize_with_gemini)
@@ -333,6 +564,31 @@ class RAGAIAgent:
         self.skill_registry.register("do_math", self._do_math)
         self.skill_registry.register("generate_code", self._generate_code_with_gemini)
         self.skill_registry.register("recall_fact", self._recall_fact)
+    
+    def debug_memory(self) -> Dict[str, Any]:
+        """Debug memory contents"""
+        try:
+            total_memories = self.memory_bank.count()
+            print(f"📊 Total memories in database: {total_memories}")
+            
+            # Get memories by category
+            user_info_memories = self.memory_bank.get_by_category("user_info", limit=10)
+            print(f"🔍 User info memories: {len(user_info_memories)}")
+            
+            # Search for specific terms
+            name_memories = self.memory_bank.search("name", limit=10)
+            print(f"🔍 Memories containing 'name': {len(name_memories)}")
+            
+            return {
+                "total_memories": total_memories,
+                "user_info_memories": len(user_info_memories),
+                "user_info_details": [mem.content for mem in user_info_memories],
+                "name_memories": len(name_memories),
+                "name_details": [mem.content for mem in name_memories]
+            }
+        except Exception as e:
+            print(f"❌ Error debugging memory: {e}")
+            return {"error": str(e)}
     
     async def process_input(self, user_input: str) -> Any:
         start = time.time()
@@ -495,30 +751,91 @@ class RAGAIAgent:
                 "message": f"Error ingesting document: {str(e)}"
             }
     
-    # Keep all the original methods from the previous agent
     def _analyze_intent(self, text: str) -> Dict[str, Any]:
-        # [Previous implementation remains the same]
+        """Enhanced intent analysis with memory operations"""
         lower = text.lower().strip()
+        print(f"🔍 Analyzing intent for: '{text}'")
+        
+        # Memory storage detection - expanded patterns
+        remember_patterns = [
+            r"my name is\s+(\w+)",
+            r"i am\s+(\w+)",
+            r"call me\s+(\w+)",
+            r"remember\s+(?:that\s+)?(.+)",
+            r"store\s+(?:that\s+)?(.+)",
+            r"save\s+(?:that\s+)?(.+)",
+            r"learn\s+(?:that\s+)?(.+)"
+        ]
+        
+        for pattern in remember_patterns:
+            match = re.search(pattern, lower)
+            if match:
+                print("✅ Detected MEMORY STORE intent")
+                return {
+                    "type": "memory_store",
+                    "action": "learn_pattern", 
+                    "confidence": 0.95
+                }
+        
+        # Memory recall detection - GREATLY EXPANDED patterns
+        recall_patterns = [
+            r"what'?s?\s+my\s+name",
+            r"who\s+am\s+i",
+            r"what\s+do\s+you\s+(?:know|remember)\s+about\s+me",
+            r"do\s+you\s+remember\s+(.+)",
+            r"recall\s+(.+)",
+            r"what\s+did\s+i\s+(?:tell|say)\s+(?:you\s+)?about\s+(.+)",
+            r"what'?s?\s+my\s+favorite\s+(.+)",
+            r"what\s+is\s+my\s+(.+)",
+            r"tell\s+me\s+(?:about\s+)?my\s+(.+)",
+            r"do\s+you\s+know\s+my\s+(.+)",
+            r"what\s+(?:do\s+you\s+)?(?:know\s+)?about\s+my\s+(.+)"
+        ]
+        
+        for pattern in recall_patterns:
+            if re.search(pattern, lower):
+                print("✅ Detected MEMORY RECALL intent")
+                return {
+                    "type": "memory_recall",
+                    "action": "recall_fact",
+                    "confidence": 0.95
+                }
+        
+        # Check for "my" keyword which often indicates personal info query
+        if "my" in lower and any(q in lower for q in ["what", "tell", "know", "remember"]):
+            print("✅ Detected MEMORY RECALL intent (my + question word)")
+            return {
+                "type": "memory_recall",
+                "action": "recall_fact",
+                "confidence": 0.9
+            }
         
         # RAG detection
         if self._needs_rag(text, {}):
+            print("✅ Detected RAG intent")
             return {
                 "type": "rag",
                 "action": "rag_query",
                 "confidence": 0.95
             }
         
-        # [Rest of the previous intent analysis code]
-        # Weather detection
-        weather_keywords = ["weather", "temperature", "forecast", "rain", "sunny", "cloudy", "windy", "snow", "humidity"]
-        if any(word in text.lower() for word in weather_keywords):
+        # Math detection - be more specific to avoid conflicts
+        math_patterns = [
+            r"\d+\s*[\+\-\*/]\s*\d+",  # Basic arithmetic
+            r"calculate\s+(.+)",
+            r"what\s+is\s+\d+",
+            r"math\s+problem"
+        ]
+        if any(re.search(pattern, lower) for pattern in math_patterns):
+            print("✅ Detected MATH intent")
             return {
-                "type": "weather",
-                "action": "weather",
-                "confidence": 0.98
+                "type": "math",
+                "action": "do_math",
+                "confidence": 0.9
             }
         
-        # Continue with previous implementation...
+        # Default to general response
+        print("✅ Detected GENERAL intent")
         return {
             "type": "general",
             "action": "generate_response",
@@ -528,18 +845,32 @@ class RAGAIAgent:
     def _execute_skill(self, intent: Dict[str, Any], input_text: str) -> Any:
         """Execute skill based on intent"""
         skill_name = intent["action"]
+        print(f"🚀 Executing skill: {skill_name}")
+        print(f"🚀 Available skills: {self.skill_registry.list_skills()}")
+        
         skill = self.skill_registry.get_skill(skill_name)
         
         if skill:
-            # Handle async skills
-            if asyncio.iscoroutinefunction(skill):
-                return asyncio.create_task(skill(input_text))
-            return skill(input_text)
+            print(f"✅ Found skill: {skill_name}")
+            try:
+                # Handle async skills
+                if asyncio.iscoroutinefunction(skill):
+                    print(f"🔄 Skill {skill_name} is async")
+                    return asyncio.create_task(skill(input_text))
+                else:
+                    print(f"🔄 Skill {skill_name} is sync")
+                    result = skill(input_text)
+                    print(f"✅ Skill result: {result}")
+                    return result
+            except Exception as e:
+                print(f"❌ Error executing skill {skill_name}: {e}")
+                traceback.print_exc()
+                return {"response": f"Error executing {skill_name}: {str(e)}", "type": "error"}
         else:
-            return {"response": "I'm not sure how to handle that request yet, but I'm always learning!"}
+            print(f"❌ Skill not found: {skill_name}")
+            return {"response": "I'm not sure how to handle that request yet, but I'm always learning!", "type": "general"}
     
-    # [Include all other methods from original agent]
-    def _analyze_text(self, text: str) -> str:
+    def _analyze_text(self, text: str) -> Dict[str, str]:
         word_count = len(text.split())
         sentences = text.split('.')
         sentence_count = len([s for s in sentences if s.strip()])
@@ -549,192 +880,290 @@ class RAGAIAgent:
             f"Analyze the sentiment and key themes in this text: {text[:500]}"
         )
         
-        return (
+        response = (
             f"Here's what I found about your text!\n"
             f"- Word count: {word_count}\n"
             f"- Sentences: {sentence_count}\n"
             f"- AI Analysis: {gemini_analysis}\n"
         )
+        
+        return {"response": response, "type": "analysis"}
     
-    def _extract_entities(self, text: str) -> str:
+    def _extract_entities(self, text: str) -> Dict[str, str]:
         # Use Gemini for better entity extraction
         prompt = f"Extract all named entities (people, places, organizations, dates, numbers) from this text: {text}"
-        return self.gemini.generate_response(prompt)
+        response = self.gemini.generate_response(prompt)
+        return {"response": response, "type": "entities"}
     
-    def _generate_response(self, text: str) -> str:
-        # Use Gemini for general responses
-        return self.gemini.generate_response(text)
+    def _generate_response(self, text: str) -> Dict[str, str]:
+        """Use Gemini for general responses"""
+        try:
+            response = self.gemini.generate_response(text)
+            return {
+                "response": response,
+                "type": "general"
+            }
+        except Exception as e:
+            return {
+                "response": f"I encountered an error: {str(e)}",
+                "type": "error"
+            }
     
-    def _learn_pattern(self, text: str) -> str:
+    def _learn_pattern(self, text: str) -> Dict[str, str]:
+        """Store information in memory - IMPROVED VERSION"""
         self.state = AgentState.LEARNING
+        print(f"🧠 Learning pattern: {text}")
         
-        # Store in both memory bank and vector store
-        memory_entry = {
-            "text": text,
-            "learned_at": datetime.datetime.now().isoformat()
-        }
-        
-        self.memory_bank.store(
-            content=memory_entry,
-            category="learned_pattern"
-        )
-        
-        # Add to vector store for RAG
-        self.vector_store.add_documents([{
-            "id": str(uuid.uuid4()),
-            "content": text,
-            "metadata": {"type": "learned_pattern", "timestamp": datetime.datetime.now().isoformat()}
-        }])
-        
-        self.experience_points += 10
-        self.state = AgentState.IDLE
-        
-        return f"Thanks for teaching me! I've stored that in my knowledge base: '{text}'"
+        try:
+            # Extract name patterns
+            name_patterns = [
+                r"my name is\s+(\w+)",
+                r"i am\s+(\w+)",
+                r"call me\s+(\w+)"
+            ]
+            
+            name = None
+            for pattern in name_patterns:
+                match = re.search(pattern, text.lower())
+                if match:
+                    name = match.group(1).title()
+                    break
+            
+            if name:
+                # Store name information
+                memory_entry = {
+                    "name": name,
+                    "full_text": text,
+                    "learned_at": datetime.datetime.now().isoformat(),
+                    "type": "user_name"
+                }
+                category = "user_info"
+                
+                # Store multiple ways for better recall
+                stored_memory = self.memory_bank.store(
+                    content=memory_entry,
+                    category=category
+                )
+                
+                # Also store a simplified version
+                self.memory_bank.store(
+                    content={"user_name": name, "timestamp": datetime.datetime.now().isoformat()},
+                    category="name"
+                )
+                
+                response_msg = f"✓ Nice to meet you, {name}! I'll remember your name."
+            else:
+                # General learning
+                memory_entry = {
+                    "content": text,
+                    "learned_at": datetime.datetime.now().isoformat(),
+                    "type": "general_fact"
+                }
+                category = "learned_pattern"
+                
+                stored_memory = self.memory_bank.store(
+                    content=memory_entry,
+                    category=category
+                )
+                
+                response_msg = f"✓ I've learned that: '{text}'"
+            
+            # Also add to vector store for RAG
+            self.vector_store.add_documents([{
+                "id": str(uuid.uuid4()),
+                "content": text,
+                "metadata": {
+                    "type": "learned_pattern",
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "category": category
+                }
+            }])
+            
+            print(f"✅ Memory stored successfully with ID: {stored_memory.id}")
+            self.experience_points += 10
+            self.state = AgentState.IDLE
+            
+            return {
+                "response": response_msg,
+                "type": "memory_stored"
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in _learn_pattern: {e}")
+            traceback.print_exc()
+            self.state = AgentState.IDLE
+            return {
+                "response": f"✗ Sorry, I had trouble storing that memory: {str(e)}",
+                "type": "error"
+            }
     
-    def _do_math(self, text: str) -> str:
+    def _recall_fact(self, text: str) -> Dict[str, str]:
+        """Enhanced recall that searches memory effectively"""
+        print(f"🔍 Recalling fact for: '{text}'")
+        
+        try:
+            # Check total memory count
+            total = self.memory_bank.count()
+            print(f"📊 Total memories available: {total}")
+            
+            # For name queries, check user_info category first
+            if "name" in text.lower():
+                print("🔍 Looking for name in user_info category...")
+                
+                # Search user_info category
+                user_memories = self.memory_bank.get_by_category("user_info", limit=10)
+                print(f"Found {len(user_memories)} user_info memories")
+                
+                # Look for most recent name
+                for memory in user_memories:
+                    if "name" in memory.content:
+                        name = memory.content["name"]
+                        print(f"✅ Found name: {name}")
+                        return {
+                            "response": f"Your name is {name}! I remember you told me that.",
+                            "type": "memory_recall"
+                        }
+                
+                # Also check simplified name category
+                name_memories = self.memory_bank.get_by_category("name", limit=5)
+                for memory in name_memories:
+                    if "user_name" in memory.content:
+                        name = memory.content["user_name"]
+                        return {
+                            "response": f"Your name is {name}!",
+                            "type": "memory_recall"
+                        }
+            
+            # Extract what the user is asking about
+            query_patterns = [
+                r"what'?s?\s+my\s+favorite\s+(.+)",
+                r"what\s+is\s+my\s+(.+)",
+                r"tell\s+me\s+(?:about\s+)?my\s+(.+)",
+                r"do\s+you\s+know\s+my\s+(.+)",
+                r"what\s+(?:do\s+you\s+)?(?:know\s+)?about\s+my\s+(.+)"
+            ]
+            
+            search_topic = None
+            for pattern in query_patterns:
+                match = re.search(pattern, text.lower())
+                if match:
+                    search_topic = match.group(1).strip()
+                    print(f"🔍 User is asking about their: {search_topic}")
+                    break
+            
+            # Search for the specific topic
+            if search_topic:
+                # Search for memories containing the topic
+                topic_memories = self.memory_bank.search(search_topic, limit=10)
+                print(f"🔍 Found {len(topic_memories)} memories about '{search_topic}'")
+                
+                for memory in topic_memories:
+                    content = memory.content
+                    
+                    # Check if this memory contains info about the topic
+                    if isinstance(content, dict):
+                        # Look in the stored text
+                        stored_text = content.get("content", content.get("full_text", content.get("text", "")))
+                        if search_topic in stored_text.lower():
+                            # Extract the relevant part
+                            if "favorite" in text.lower() and "favorite" in stored_text.lower():
+                                # Try to extract "favorite X is Y" pattern
+                                fav_match = re.search(rf"(?:my\s+)?favorite\s+{search_topic}\s+is\s+(\w+)", stored_text.lower())
+                                if fav_match:
+                                    item = fav_match.group(1)
+                                    return {
+                                        "response": f"Your favorite {search_topic} is {item}!",
+                                        "type": "memory_recall"
+                                    }
+                            
+                            # Generic response with the stored content
+                            return {
+                                "response": f"I remember you told me: {stored_text}",
+                                "type": "memory_recall"
+                            }
+            
+            # General search - extract keywords and search
+            keywords = re.findall(r'\b\w{3,}\b', text.lower())  # Words with 3+ chars
+            # Filter out common words
+            stop_words = {"what", "whats", "tell", "know", "about", "remember", "you", "the"}
+            keywords = [k for k in keywords if k not in stop_words]
+            print(f"🔍 Searching for keywords: {keywords}")
+            
+            for keyword in keywords[:5]:  # Try first 5 keywords
+                memories = self.memory_bank.search(keyword, limit=5)
+                
+                if memories:
+                    print(f"✅ Found {len(memories)} memories for '{keyword}'")
+                    memory = memories[0]  # Use most recent
+                    
+                    # Format response based on memory type
+                    if isinstance(memory.content, dict):
+                        if "content" in memory.content:
+                            recalled_text = memory.content["content"]
+                        elif "full_text" in memory.content:
+                            recalled_text = memory.content["full_text"]
+                        elif "text" in memory.content:
+                            recalled_text = memory.content["text"]
+                        else:
+                            recalled_text = str(memory.content)
+                        
+                        return {
+                            "response": f"I remember: {recalled_text}",
+                            "type": "memory_recall"
+                        }
+            
+            # Try vector store as fallback
+            vector_results = self.vector_store.search(text, k=1)
+            if vector_results:
+                return {
+                    "response": f"From my knowledge base: {vector_results[0]['content']}",
+                    "type": "memory_recall"
+                }
+            
+            # No memories found
+            print("❌ No relevant memories found")
+            return {
+                "response": f"I don't have any specific memories about that yet. I currently have {total} memories stored. Try teaching me something first!",
+                "type": "memory_recall"
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in _recall_fact: {e}")
+            traceback.print_exc()
+            return {
+                "response": f"Sorry, I had trouble searching my memory: {str(e)}",
+                "type": "error"
+            }
+    
+    def _do_math(self, text: str) -> Dict[str, str]:
         # First try local calculation
         try:
-            # [Previous math implementation]
+            # Simple math expression parsing
             expr = text.lower().replace('what is', '').replace('calculate', '').strip()
-            # ... (rest of math processing)
-            return f"The answer is: {eval(expr)}"
+            # Remove question marks and other punctuation
+            expr = re.sub(r'[^\d+\-*/().\s]', '', expr)
+            
+            if expr:
+                result = eval(expr)
+                return {
+                    "response": f"The answer is: {result}",
+                    "type": "math"
+                }
         except:
-            # Fall back to Gemini for complex math
-            return self.gemini.generate_response(f"Solve this math problem: {text}")
-    
-    def _recall_fact(self, text: str) -> str:
-        # Search in vector store first
-        results = self.vector_store.search(text, k=1)
-        if results:
-            return f"I remember: {results[0]['content']}"
+            pass
         
-        # Fall back to memory bank
-        keywords = re.findall(r'\w+', text.lower())
-        facts = self.memory_bank.search(keywords[0] if keywords else '', limit=1)
-        if facts:
-            return f"I recall: {facts[0].content.get('text', 'something about that')}"
-        
-        return "I don't have any information about that in my knowledge base yet."
-
-class MemoryBank:
-    def __init__(self, db_path: str = ":memory:"):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._init_db()
-        self.item_count = 0
-    
-    def _init_db(self):
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS memories (
-                id TEXT PRIMARY KEY,
-                content TEXT,
-                category TEXT,
-                timestamp TEXT,
-                relevance_score REAL
-            )
-        """)
-        self.conn.commit()
-
-
-    
-    def store(self, content: Dict[str, Any], category: str) -> Memory:
-        # Implement FIFO if exceeding max items
-        if self.item_count >= Config.MAX_MEMORY_ITEMS:
-            # Delete oldest entry
-            self.conn.execute(
-                "DELETE FROM memories WHERE id = (SELECT id FROM memories ORDER BY timestamp ASC LIMIT 1)"
-            )
-        
-        memory = Memory(
-            id=f"mem_{uuid.uuid4()}",
-            content=content,
-            timestamp=datetime.datetime.now(),
-            category=category
-        )
-        
-        self.conn.execute(
-            "INSERT INTO memories VALUES (?, ?, ?, ?, ?)",
-            (memory.id, json.dumps(content), category, 
-             memory.timestamp.isoformat(), memory.relevance_score)
-        )
-        self.conn.commit()
-        self.item_count += 1
-        
-        return memory
-    
-    def search(self, query: str, limit: int = 5) -> List[Memory]:
-        cursor = self.conn.execute(
-            "SELECT * FROM memories WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
-            (f"%{query}%", limit)
-        )
-        
-        memories = []
-        for row in cursor:
-            memories.append(Memory(
-                id=row[0],
-                content=json.loads(row[1]),
-                timestamp=datetime.datetime.fromisoformat(row[3]),
-                category=row[2],
-                relevance_score=row[4]
-            ))
-        
-        return memories
-    
-    def count(self) -> int:
-        cursor = self.conn.execute("SELECT COUNT(*) FROM memories")
-        return cursor.fetchone()[0]
-
-class TaskManager:
-    def __init__(self):
-        self.tasks: Dict[str, Task] = {}
-        self.task_queue: List[str] = []
-    
-    def create_task(self, description: str, priority: Priority = Priority.MEDIUM, 
-                   dependencies: List[str] = None) -> Task:
-        task = Task(
-            id=f"task_{datetime.datetime.now().timestamp()}",
-            description=description,
-            priority=priority,
-            created_at=datetime.datetime.now(),
-            dependencies=dependencies or []
-        )
-        
-        self.tasks[task.id] = task
-        self._update_queue()
-        
-        return task
-    
-    def complete_task(self, task_id: str, result: Any = None):
-        if task_id in self.tasks:
-            self.tasks[task_id].completed = True
-            self.tasks[task_id].result = result
-            self._update_queue()
-    
-    def get_pending_tasks(self) -> List[Task]:
-        pending = [t for t in self.tasks.values() if not t.completed]
-        return sorted(pending, key=lambda t: t.priority.value, reverse=True)
-    
-    def _update_queue(self):
-        pending = self.get_pending_tasks()
-        self.task_queue = [t.id for t in pending if self._can_execute(t)]
-    
-    def _can_execute(self, task: Task) -> bool:
-        for dep_id in task.dependencies:
-            if dep_id in self.tasks and not self.tasks[dep_id].completed:
-                return False
-        return True
-
-class SkillRegistry:
-    def __init__(self):
-        self.skills: Dict[str, Callable] = {}
-    
-    def register(self, name: str, skill_func: Callable):
-        self.skills[name] = skill_func
-    
-    def get_skill(self, name: str) -> Optional[Callable]:
-        return self.skills.get(name)
-    
-    def list_skills(self) -> List[str]:
-        return list(self.skills.keys())
+        # Fall back to Gemini for complex math
+        try:
+            response = self.gemini.generate_response(f"Solve this math problem: {text}")
+            return {
+                "response": response,
+                "type": "math"
+            }
+        except Exception as e:
+            return {
+                "response": f"I had trouble with that math problem: {str(e)}",
+                "type": "error"
+            }
 
 # FastAPI Application
 app = FastAPI(title="RAG AI Agent API")
@@ -800,6 +1229,14 @@ async def get_status():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "agent": agent.name}
+
+@app.get("/api/debug/memory")
+async def debug_memory():
+    """Debug memory contents"""
+    try:
+        return agent.debug_memory()
+    except Exception as e:
+        return {"error": str(e)}
 
 # Deployment script for small VM
 if __name__ == "__main__":
